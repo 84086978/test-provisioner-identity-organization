@@ -29,13 +29,13 @@ import io.mifos.core.test.env.TestEnvironment;
 import io.mifos.core.test.servicestarter.EurekaForTest;
 import io.mifos.core.test.servicestarter.IntegrationTestEnvironment;
 import io.mifos.core.test.servicestarter.Microservice;
-import io.mifos.office.api.v1.client.OfficeClient;
+import io.mifos.office.api.v1.client.OrganizationManager;
 import io.mifos.office.api.v1.domain.ContactDetail;
 import io.mifos.office.api.v1.domain.Employee;
 import io.mifos.office.api.v1.domain.Office;
-import io.mifos.identity.api.v1.client.IdentityService;
+import io.mifos.identity.api.v1.client.IdentityManager;
 import io.mifos.identity.api.v1.domain.*;
-import io.mifos.provisioner.api.v1.client.ProvisionerService;
+import io.mifos.provisioner.api.v1.client.Provisioner;
 import io.mifos.provisioner.api.v1.domain.*;
 import org.cassandraunit.utils.EmbeddedCassandraServerHelper;
 import org.junit.*;
@@ -62,9 +62,9 @@ import java.util.concurrent.TimeUnit;
 public class WorkflowTenantProvisioning {
   private static final String TEST_TENANT = "provisioning_integration_test";
   private static final String CLIENT_ID = "luckyLeprachaun";
-  private static Microservice<ProvisionerService> provisionerService;
-  private static Microservice<IdentityService> identityService;
-  private static Microservice<OfficeClient> officeClient;
+  private static Microservice<Provisioner> provisionerService;
+  private static Microservice<IdentityManager> identityService;
+  private static Microservice<OrganizationManager> officeClient;
   private static DB EMBEDDED_MARIA_DB;
 
 
@@ -113,15 +113,15 @@ public class WorkflowTenantProvisioning {
     EMBEDDED_MARIA_DB = DB.newEmbeddedDB(3306);
     EMBEDDED_MARIA_DB.start();
 
-    provisionerService = new Microservice<>(ProvisionerService.class, "provisioner", "0.1.0-BUILD-SNAPSHOT", integrationTestEnvironment);
+    provisionerService = new Microservice<>(Provisioner.class, "provisioner", "0.1.0-BUILD-SNAPSHOT", integrationTestEnvironment);
     final TestEnvironment provisionerTestEnvironment = provisionerService.getProcessEnvironment();
     provisionerTestEnvironment.addSystemPrivateKeyToProperties();
     provisionerTestEnvironment.setProperty("system.initialclientid", CLIENT_ID);
     provisionerService.start();
 
-    identityService = new Microservice<>(IdentityService.class, "identity", "0.1.0-BUILD-SNAPSHOT", integrationTestEnvironment);
+    identityService = new Microservice<>(IdentityManager.class, "identity", "0.1.0-BUILD-SNAPSHOT", integrationTestEnvironment);
     identityService.start();
-    officeClient = new Microservice<>(OfficeClient.class, "office", "0.1.0-BUILD-SNAPSHOT", integrationTestEnvironment);
+    officeClient = new Microservice<>(OrganizationManager.class, "office", "0.1.0-BUILD-SNAPSHOT", integrationTestEnvironment);
     officeClient.start();
   }
 
