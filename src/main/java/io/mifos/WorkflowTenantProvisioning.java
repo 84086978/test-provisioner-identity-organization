@@ -23,18 +23,21 @@ import io.mifos.core.api.context.AutoSeshat;
 import io.mifos.core.api.context.AutoUserContext;
 import io.mifos.core.api.util.ApiConstants;
 import io.mifos.core.api.util.ApiFactory;
-import io.mifos.core.lang.AutoTenantContext;
+import io.mifos.core.lang.TenantContextHolder;
 import io.mifos.core.lang.security.RsaPublicKeyBuilder;
 import io.mifos.core.test.env.TestEnvironment;
+import io.mifos.core.test.listener.EventRecorder;
+import io.mifos.core.test.servicestarter.ActiveMQForTest;
 import io.mifos.core.test.servicestarter.EurekaForTest;
 import io.mifos.core.test.servicestarter.IntegrationTestEnvironment;
 import io.mifos.core.test.servicestarter.Microservice;
+import io.mifos.identity.api.v1.EventConstants;
+import io.mifos.identity.api.v1.client.IdentityService;
+import io.mifos.identity.api.v1.domain.*;
 import io.mifos.office.api.v1.client.OfficeClient;
 import io.mifos.office.api.v1.domain.ContactDetail;
 import io.mifos.office.api.v1.domain.Employee;
 import io.mifos.office.api.v1.domain.Office;
-import io.mifos.identity.api.v1.client.IdentityService;
-import io.mifos.identity.api.v1.domain.*;
 import io.mifos.provisioner.api.v1.client.ProvisionerService;
 import io.mifos.provisioner.api.v1.domain.*;
 import org.cassandraunit.utils.EmbeddedCassandraServerHelper;
@@ -45,6 +48,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.util.Base64Utils;
@@ -60,7 +64,6 @@ import java.util.concurrent.TimeUnit;
 @RunWith(SpringRunner.class)
 @SpringBootTest()
 public class WorkflowTenantProvisioning {
-  private static final String TEST_TENANT = "provisioning_integration_test";
   private static final String CLIENT_ID = "luckyLeprachaun";
   private static Microservice<ProvisionerService> provisionerService;
   private static Microservice<IdentityService> identityService;
@@ -78,7 +81,9 @@ public class WorkflowTenantProvisioning {
   }
 
   @Configuration
+  @ActiveMQForTest.EnableActiveMQListen
   @EnableApiFactory
+  @ComponentScan("io.mifos.listener")
   public static class TestConfiguration {
     public TestConfiguration() {
       super();
@@ -94,10 +99,15 @@ public class WorkflowTenantProvisioning {
   public static final EurekaForTest eurekaForTest = new EurekaForTest();
 
   @ClassRule
+  public static final ActiveMQForTest activeMQForTest = new ActiveMQForTest();
+
+  @ClassRule
   public static final IntegrationTestEnvironment integrationTestEnvironment = new IntegrationTestEnvironment();
 
   @Autowired
   private ApiFactory apiFactory;
+  @Autowired
+  EventRecorder eventRecorder;
 
 
   public WorkflowTenantProvisioning() {
@@ -147,108 +157,107 @@ public class WorkflowTenantProvisioning {
   public void test() throws InterruptedException {
     final String tenantAdminPassword = provisionAppsViaSeshat();
 
-    try (final AutoTenantContext ignore = new AutoTenantContext(TEST_TENANT)) {
-      final Authentication adminPasswordOnlyAuthentication = identityService.api().login("antony", tenantAdminPassword);
-      try (final AutoUserContext ignored = new AutoUserContext("antony", adminPasswordOnlyAuthentication.getAccessToken()))
-      {
-        identityService.api().changeUserPassword("antony", new Password(tenantAdminPassword));
-        Thread.sleep(1000L); //TODO: replace this with an event listener.
-      }
+    final String username = "antony";
+    final Authentication adminPasswordOnlyAuthentication = identityService.api().login(username, tenantAdminPassword);
+    try (final AutoUserContext ignored = new AutoUserContext(username, adminPasswordOnlyAuthentication.getAccessToken()))
+    {
+      identityService.api().changeUserPassword(username, new Password(tenantAdminPassword));
+      Assert.assertTrue(eventRecorder.wait(EventConstants.OPERATION_PUT_USER_PASSWORD, username));
+    }
 
-      final Authentication adminAuthentication = identityService.api().login("antony", tenantAdminPassword);
+    final Authentication adminAuthentication = identityService.api().login(username, tenantAdminPassword);
 
-      final UserWithPassword officeAdministratorUser;
-      final UserWithPassword employeeUser;
-      final Role employeeRole;
-      try (final AutoUserContext ignored = new AutoUserContext("antony", adminAuthentication.getAccessToken())) {
-        checkCreationOfPermittableGroupsInIsis();
-        employeeRole = makeEmployeeRole();
-        final Role officeAdministratorRole = makeOfficeAdministratorRole();
+    final UserWithPassword officeAdministratorUser;
+    final UserWithPassword employeeUser;
+    final Role employeeRole;
+    try (final AutoUserContext ignored = new AutoUserContext(username, adminAuthentication.getAccessToken())) {
+      checkCreationOfPermittableGroupsInIsis();
+      employeeRole = makeEmployeeRole();
+      final Role officeAdministratorRole = makeOfficeAdministratorRole();
 
-        identityService.api().createRole(employeeRole);
-        identityService.api().createRole(officeAdministratorRole);
+      identityService.api().createRole(employeeRole);
+      identityService.api().createRole(officeAdministratorRole);
 
-        officeAdministratorUser = new UserWithPassword();
-        officeAdministratorUser.setIdentifier("narmer");
-        officeAdministratorUser.setPassword(encodePassword("3100BC"));
-        officeAdministratorUser.setRole(officeAdministratorRole.getIdentifier());
+      officeAdministratorUser = new UserWithPassword();
+      officeAdministratorUser.setIdentifier("narmer");
+      officeAdministratorUser.setPassword(encodePassword("3100BC"));
+      officeAdministratorUser.setRole(officeAdministratorRole.getIdentifier());
 
-        identityService.api().createUser(officeAdministratorUser);
-        Thread.sleep(500L); //TODO: replace this with an event listener.
+      identityService.api().createUser(officeAdministratorUser);
+      Assert.assertTrue(eventRecorder.wait(EventConstants.OPERATION_POST_USER, officeAdministratorUser.getIdentifier()));
 
-        identityService.api().logout();
-      }
+      identityService.api().logout();
+    }
 
-      final Authentication officeAdministratorPasswordOnlyAuthentication = identityService.api().login(officeAdministratorUser.getIdentifier(), officeAdministratorUser.getPassword());
-      try (final AutoUserContext ignored = new AutoUserContext(officeAdministratorUser.getIdentifier(), officeAdministratorPasswordOnlyAuthentication.getAccessToken()))
-      {
-        identityService.api().changeUserPassword(officeAdministratorUser.getIdentifier(), new Password(officeAdministratorUser.getPassword()));
-        Thread.sleep(1500L); //TODO: replace this with an event listener.
-      }
+    final Authentication officeAdministratorPasswordOnlyAuthentication = identityService.api().login(officeAdministratorUser.getIdentifier(), officeAdministratorUser.getPassword());
+    try (final AutoUserContext ignored = new AutoUserContext(officeAdministratorUser.getIdentifier(), officeAdministratorPasswordOnlyAuthentication.getAccessToken()))
+    {
+      identityService.api().changeUserPassword(officeAdministratorUser.getIdentifier(), new Password(officeAdministratorUser.getPassword()));
+      Assert.assertTrue(eventRecorder.wait(EventConstants.OPERATION_PUT_USER_PASSWORD, officeAdministratorUser.getIdentifier()));
+    }
 
-      final Authentication officeAdministratorAuthentication = identityService.api().login(officeAdministratorUser.getIdentifier(), officeAdministratorUser.getPassword());
+    final Authentication officeAdministratorAuthentication = identityService.api().login(officeAdministratorUser.getIdentifier(), officeAdministratorUser.getPassword());
 
-      try (final AutoUserContext ignored = new AutoUserContext(officeAdministratorUser.getIdentifier(), officeAdministratorAuthentication.getAccessToken())) {
-        final Set<Permission> userPermissions = identityService.api().getUserPermissions(officeAdministratorUser.getIdentifier());
-        Assert.assertTrue(userPermissions.contains(new Permission(io.mifos.office.api.v1.PermittableGroupIds.EMPLOYEE_MANAGEMENT, AllowedOperation.ALL)));
-        Assert.assertTrue(userPermissions.contains(new Permission(io.mifos.office.api.v1.PermittableGroupIds.OFFICE_MANAGEMENT, AllowedOperation.ALL)));
+    try (final AutoUserContext ignored = new AutoUserContext(officeAdministratorUser.getIdentifier(), officeAdministratorAuthentication.getAccessToken())) {
+      final Set<Permission> userPermissions = identityService.api().getUserPermissions(officeAdministratorUser.getIdentifier());
+      Assert.assertTrue(userPermissions.contains(new Permission(io.mifos.office.api.v1.PermittableGroupIds.EMPLOYEE_MANAGEMENT, AllowedOperation.ALL)));
+      Assert.assertTrue(userPermissions.contains(new Permission(io.mifos.office.api.v1.PermittableGroupIds.OFFICE_MANAGEMENT, AllowedOperation.ALL)));
 
-        final Office office = new Office();
-        office.setIdentifier("abydos");
-        office.setName("Abydos");
-        office.setDescription("First bank of the nile");
-        WorkflowTenantProvisioning.officeClient.api().createOffice(office);
+      final Office office = new Office();
+      office.setIdentifier("abydos");
+      office.setName("Abydos");
+      office.setDescription("First bank of the nile");
+      WorkflowTenantProvisioning.officeClient.api().createOffice(office);
 
-        Thread.sleep(500L); //TODO: replace this with an event listener.
+      Assert.assertTrue(this.eventRecorder.wait(io.mifos.office.api.v1.EventConstants.OPERATION_POST_OFFICE, office.getIdentifier()));
 
-        employeeUser = new UserWithPassword();
-        employeeUser.setIdentifier("iryhor");
-        employeeUser.setPassword(encodePassword("3150BC"));
-        employeeUser.setRole(employeeRole.getIdentifier());
+      employeeUser = new UserWithPassword();
+      employeeUser.setIdentifier("iryhor");
+      employeeUser.setPassword(encodePassword("3150BC"));
+      employeeUser.setRole(employeeRole.getIdentifier());
 
-        identityService.api().createUser(employeeUser);
+      identityService.api().createUser(employeeUser);
 
-        final Employee employee = new Employee();
-        employee.setIdentifier(employeeUser.getIdentifier());
-        employee.setGivenName("Iry");
-        employee.setSurname("Hor");
-        employee.setAssignedOffice("abydos");
-        WorkflowTenantProvisioning.officeClient.api().createEmployee(employee);
+      final Employee employee = new Employee();
+      employee.setIdentifier(employeeUser.getIdentifier());
+      employee.setGivenName("Iry");
+      employee.setSurname("Hor");
+      employee.setAssignedOffice("abydos");
+      WorkflowTenantProvisioning.officeClient.api().createEmployee(employee);
 
-        Thread.sleep(500L); //TODO: replace this with an event listener.
+      Assert.assertTrue(this.eventRecorder.wait(io.mifos.office.api.v1.EventConstants.OPERATION_POST_EMPLOYEE, employee.getIdentifier()));
 
-        identityService.api().logout();
-      }
+      identityService.api().logout();
+    }
 
-      final Authentication employeePasswordOnlyAuthentication = identityService.api().login(employeeUser.getIdentifier(), employeeUser.getPassword());
-      try (final AutoUserContext ignored = new AutoUserContext(employeeUser.getIdentifier(), employeePasswordOnlyAuthentication.getAccessToken()))
-      {
-        identityService.api().changeUserPassword(employeeUser.getIdentifier(), new Password(employeeUser.getPassword()));
-        Thread.sleep(1000L); //TODO: replace this with an event listener.
-      }
+    final Authentication employeePasswordOnlyAuthentication = identityService.api().login(employeeUser.getIdentifier(), employeeUser.getPassword());
+    try (final AutoUserContext ignored = new AutoUserContext(employeeUser.getIdentifier(), employeePasswordOnlyAuthentication.getAccessToken()))
+    {
+      identityService.api().changeUserPassword(employeeUser.getIdentifier(), new Password(employeeUser.getPassword()));
+      Assert.assertTrue(eventRecorder.wait(EventConstants.OPERATION_PUT_USER_PASSWORD, employeeUser.getIdentifier()));
+    }
 
-      final Authentication employeeAuthentication = identityService.api().login(employeeUser.getIdentifier(), employeeUser.getPassword());
+    final Authentication employeeAuthentication = identityService.api().login(employeeUser.getIdentifier(), employeeUser.getPassword());
 
-      try (final AutoUserContext ignored = new AutoUserContext(employeeUser.getIdentifier(), employeeAuthentication.getAccessToken())) {
-        final ContactDetail contactDetail = new ContactDetail();
-        contactDetail.setType(ContactDetail.Type.EMAIL.toString());
-        contactDetail.setValue("iryhor@ancient.eg");
-        contactDetail.setGroup(ContactDetail.Group.PRIVATE.toString());
-        officeClient.api().setContactDetails(employeeUser.getIdentifier(), Collections.singletonList(contactDetail));
+    try (final AutoUserContext ignored = new AutoUserContext(employeeUser.getIdentifier(), employeeAuthentication.getAccessToken())) {
+      final ContactDetail contactDetail = new ContactDetail();
+      contactDetail.setType(ContactDetail.Type.EMAIL.toString());
+      contactDetail.setValue("iryhor@ancient.eg");
+      contactDetail.setGroup(ContactDetail.Group.PRIVATE.toString());
+      officeClient.api().setContactDetails(employeeUser.getIdentifier(), Collections.singletonList(contactDetail));
 
-        Thread.sleep(500L); //TODO: replace this with an event listener.
+      Assert.assertTrue(this.eventRecorder.wait(io.mifos.office.api.v1.EventConstants.OPERATION_PUT_CONTACT_DETAIL, employeeUser.getIdentifier()));
 
-        final Employee employee = officeClient.api().findEmployee(employeeUser.getIdentifier());
-        Assert.assertNotNull(employeeUser);
+      final Employee employee = officeClient.api().findEmployee(employeeUser.getIdentifier());
+      Assert.assertNotNull(employeeUser);
 
-        Assert.assertEquals(employee.getIdentifier(), employeeUser.getIdentifier());
-        Assert.assertEquals(employee.getAssignedOffice(), "abydos");
-        Assert.assertEquals(employee.getGivenName(), "Iry");
-        Assert.assertEquals(employee.getSurname(), "Hor");
-        Assert.assertEquals(employee.getContactDetails(), Collections.singletonList(contactDetail));
+      Assert.assertEquals(employee.getIdentifier(), employeeUser.getIdentifier());
+      Assert.assertEquals(employee.getAssignedOffice(), "abydos");
+      Assert.assertEquals(employee.getGivenName(), "Iry");
+      Assert.assertEquals(employee.getSurname(), "Hor");
+      Assert.assertEquals(employee.getContactDetails(), Collections.singletonList(contactDetail));
 
-        identityService.api().logout();
-      }
+      identityService.api().logout();
     }
   }
 
@@ -297,7 +306,7 @@ public class WorkflowTenantProvisioning {
 
       provisionerService.api().assignApplications(tenant.getIdentifier(), Collections.singletonList(horusAssigned));
 
-      Thread.sleep(700L); //TODO: replace this with an event listener.
+      Assert.assertTrue(this.eventRecorder.wait(io.mifos.office.api.v1.EventConstants.INITIALIZE, io.mifos.office.api.v1.EventConstants.INITIALIZE));
 
       return isisAdminPassword.getAdminPassword();
     }
@@ -310,7 +319,7 @@ public class WorkflowTenantProvisioning {
   private Tenant makeTenant() {
     final Tenant tenant = new Tenant();
     tenant.setName("dudette");
-    tenant.setIdentifier(TEST_TENANT);
+    tenant.setIdentifier(TenantContextHolder.checkedGetIdentifier());
     tenant.setDescription("oogie boogie woman");
 
     final CassandraConnectionInfo cassandraConnectionInfo = new CassandraConnectionInfo();
