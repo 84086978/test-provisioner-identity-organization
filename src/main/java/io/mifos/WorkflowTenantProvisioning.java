@@ -17,14 +17,12 @@ package io.mifos;
 
 import ch.vorburger.mariadb4j.DB;
 import io.mifos.anubis.api.v1.domain.AllowedOperation;
-import io.mifos.anubis.api.v1.domain.Signature;
 import io.mifos.core.api.config.EnableApiFactory;
 import io.mifos.core.api.context.AutoSeshat;
 import io.mifos.core.api.context.AutoUserContext;
 import io.mifos.core.api.util.ApiConstants;
 import io.mifos.core.api.util.ApiFactory;
 import io.mifos.core.lang.TenantContextHolder;
-import io.mifos.core.lang.security.RsaPublicKeyBuilder;
 import io.mifos.core.test.env.TestEnvironment;
 import io.mifos.core.test.listener.EventRecorder;
 import io.mifos.core.test.servicestarter.ActiveMQForTest;
@@ -53,7 +51,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.util.Base64Utils;
 
-import java.security.PublicKey;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -69,16 +66,6 @@ public class WorkflowTenantProvisioning {
   private static Microservice<IdentityManager> identityService;
   private static Microservice<OrganizationManager> officeClient;
   private static DB EMBEDDED_MARIA_DB;
-
-
-  public PublicKey getPublicKey() {
-    final Signature sig = identityService.api().getSignature();
-
-    return new RsaPublicKeyBuilder()
-            .setPublicKeyMod(sig.getPublicKeyMod())
-            .setPublicKeyExp(sig.getPublicKeyExp())
-            .build();
-  }
 
   @Configuration
   @ActiveMQForTest.EnableActiveMQListen
