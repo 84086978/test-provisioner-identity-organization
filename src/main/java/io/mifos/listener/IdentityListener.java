@@ -17,6 +17,7 @@ package io.mifos.listener;
 
 import io.mifos.core.lang.config.TenantHeaderFilter;
 import io.mifos.core.test.listener.EventRecorder;
+import io.mifos.identity.api.v1.events.ApplicationSignatureEvent;
 import io.mifos.identity.api.v1.events.EventConstants;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jms.annotation.JmsListener;
@@ -57,5 +58,16 @@ public class IdentityListener {
           @Header(TenantHeaderFilter.TENANT_HEADER)final String tenant,
           final String payload) throws Exception {
     eventRecorder.event(tenant, EventConstants.OPERATION_PUT_USER_PASSWORD, payload, String.class);
+  }
+
+  @JmsListener(
+          subscription = EventConstants.DESTINATION,
+          destination = EventConstants.DESTINATION,
+          selector = EventConstants.SELECTOR_POST_PERMITTABLE_GROUP
+  )
+  public void onCreatePermittableGroup(
+          @Header(TenantHeaderFilter.TENANT_HEADER)final String tenant,
+          final String payload) throws Exception {
+    eventRecorder.event(tenant, EventConstants.OPERATION_POST_PERMITTABLE_GROUP, payload, String.class);
   }
 }

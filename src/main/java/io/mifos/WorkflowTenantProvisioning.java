@@ -17,6 +17,7 @@ package io.mifos;
 
 import ch.vorburger.mariadb4j.DB;
 import io.mifos.anubis.api.v1.domain.AllowedOperation;
+import io.mifos.anubis.api.v1.domain.ApplicationSignatureSet;
 import io.mifos.core.api.config.EnableApiFactory;
 import io.mifos.core.api.context.AutoSeshat;
 import io.mifos.core.api.context.AutoUserContext;
@@ -29,9 +30,9 @@ import io.mifos.core.test.servicestarter.ActiveMQForTest;
 import io.mifos.core.test.servicestarter.EurekaForTest;
 import io.mifos.core.test.servicestarter.IntegrationTestEnvironment;
 import io.mifos.core.test.servicestarter.Microservice;
-import io.mifos.identity.api.v1.events.EventConstants;
 import io.mifos.identity.api.v1.client.IdentityManager;
 import io.mifos.identity.api.v1.domain.*;
+import io.mifos.identity.api.v1.events.EventConstants;
 import io.mifos.office.api.v1.client.OrganizationManager;
 import io.mifos.office.api.v1.domain.ContactDetail;
 import io.mifos.office.api.v1.domain.Employee;
@@ -159,6 +160,9 @@ public class WorkflowTenantProvisioning {
     final Role employeeRole;
     try (final AutoUserContext ignored = new AutoUserContext(username, adminAuthentication.getAccessToken())) {
       checkCreationOfPermittableGroupsInIsis();
+      //TODO: fix tokens for this call
+      // checkSignatureSetTimeStampsLineup();
+
       employeeRole = makeEmployeeRole();
       final Role officeAdministratorRole = makeOfficeAdministratorRole();
 
@@ -248,7 +252,18 @@ public class WorkflowTenantProvisioning {
     }
   }
 
-  private void checkCreationOfPermittableGroupsInIsis() {
+  @SuppressWarnings("unused")
+  private void checkSignatureSetTimeStampsLineup() {
+    //TODO: Need to put this in a *system* call context rather than a tenant call context.
+    final ApplicationSignatureSet latestSignatureSet = identityService.api().getLatestSignatureSet();
+    identityService.api().getApplicationSignature(officeClient.name(), latestSignatureSet.getTimestamp());
+  }
+
+  private void checkCreationOfPermittableGroupsInIsis() throws InterruptedException {
+    Assert.assertTrue(this.eventRecorder.wait(EventConstants.OPERATION_POST_PERMITTABLE_GROUP, io.mifos.office.api.v1.PermittableGroupIds.EMPLOYEE_MANAGEMENT));
+    Assert.assertTrue(this.eventRecorder.wait(EventConstants.OPERATION_POST_PERMITTABLE_GROUP, io.mifos.office.api.v1.PermittableGroupIds.OFFICE_MANAGEMENT));
+    Assert.assertTrue(this.eventRecorder.wait(EventConstants.OPERATION_POST_PERMITTABLE_GROUP, io.mifos.office.api.v1.PermittableGroupIds.SELF_MANAGEMENT));
+
     identityService.api().getPermittableGroup(io.mifos.identity.api.v1.PermittableGroupIds.ROLE_MANAGEMENT);
     identityService.api().getPermittableGroup(io.mifos.identity.api.v1.PermittableGroupIds.IDENTITY_MANAGEMENT);
     identityService.api().getPermittableGroup(io.mifos.identity.api.v1.PermittableGroupIds.SELF_MANAGEMENT);
